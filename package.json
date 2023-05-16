@@ -1,0 +1,30 @@
+{
+  "description": "REST API for an online store that sells electronic products. The API allows to perform CRUD operations on products, Search them by name, description, and category, Add product in cart and place order and Register and authenticate users.",
+  "dependencies": {
+    "bcrypt": "^5.1.0",
+    "cors": "^2.8.5",
+    "express": "^4.18.2",
+    "express-rate-limit": "^6.7.0",
+    "express-validator": "^7.0.1",
+    "helmet": "^7.0.0",
+    "jsonwebtoken": "^9.0.0",
+    "mongodb": "^5.5.0",
+    "morgan": "^1.10.0"
+  },
+  "scripts": {
+    "start": "node server.js"
+  },
+  "name": "fictional_online_store",
+  "version": "1.0.0",
+  "main": "server.js",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/TheStArShAdE/Fictional-Online-Store.git"
+  },
+  "author": "Zameer Ahmed",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/TheStArShAdE/Fictional-Online-Store/issues"
+  },
+  "homepage": "https://github.com/TheStArShAdE/Fictional-Online-Store#readme"
+}
