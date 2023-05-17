@@ -3,11 +3,11 @@ const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
 const morgan = require('morgan');
-const { MongoClient, ObjectID } = require('mongodb');
+const { MongoClient, ObjectId } = require('mongodb');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 const rateLimit = require('express-rate-limit');
-const { body, validationResult } = require('express-validator');
+const { validationResult } = require('express-validator');
 
 // Express app
 const app = express();
@@ -46,68 +46,59 @@ async function connectToDatabase() {
 connectToDatabase();
 
 // Validating JWT and extracting userID
-function authenticateJWT(req, res, next) {
-    const token = req.header('Authorization')?.split(' ')[1];
+const authenticateJWT = (req, res, next) => {
+    const token = req.header('Authorization');
 
     if (!token) {
         return res.status(401).json({ message: 'Unauthorized' });
     }
 
-    jwt.verify(token, 'uBCov5Hb-HWvYcNmCBMKlDv4Z-1xN5n4Nfbac3JccrrCycboCY6-c25jqZ-Lk1mx', (err, decoded) => {
-        if (err) {
-            return res.status(403).json({ message: 'Invalid token' });
-        }
-        req.userId = decoded.userId;
+    try {
+        const decoded = jwt.verify(token, 'uBCov5Hb-HWvYcNmCBMKlDv4Z-1xN5n4Nfbac3JccrrCycboCY6-c25jqZ-Lk1mx');
+        req.user = decoded;
         next();
-    });
+    } catch (error) {
+        return res.status(403).json({ message: 'Invalid token' });
+    }
 }
 
 // Route for user registration
-app.post(
-    '/api/users/register',
-    [
-        body('username').trim().notEmpty().isLength({ min: 3 }),
-        body('password').trim().notEmpty().isLength({ min: 6 })
-    ],
-    async (req, res) => {
-        try {
-            const errors = validationResult(req);
-            if (!errors.isEmpty()) {
-                return res.status(400).json({ errors: errors.array() })
-            }
+app.post('/api/users/register', async (req, res) => {
+    try {
 
-            const { username, password } = req.body;
+        const { username, password } = req.body;
 
-            const usersCollection = db.collection('users');
+        const usersCollection = db.collection('users');
 
-            // Check if the username is taken
-            const existingUser = await usersCollection.findOne({ username });
-            if (existingUser) {
-                return res.status(409).json({ message: 'Username is already taken' });
-            }
-
-            //Hash the password
-            const hashedPassword = await bcrypt.hash(password, 10);
-
-            //Crreate a new User
-            const newUser = {
-                username,
-                password: hashedPassword
-            };
-
-            //Insert the user document
-            const result = await usersCollection.insertOne(newUser);
-
-            if (result.insertedCount === 0) {
-                return res.status(500).json({ message: 'Error registering user' });
-            }
-
-            res.json({ message: 'User registered successfully' });
-        } catch (error) {
-            console.error('Error registering user:', error);
-            res.status(500).json({ message: 'Error registering user' });
+        // Check if the username is taken
+        const existingUser = await usersCollection.findOne({ username });
+        if (existingUser) {
+            return res.status(409).json({ message: 'Username is already taken' });
         }
-    });
+
+        //Hash the password
+        const hashedPassword = await bcrypt.hash(password, 10);
+
+        //Create a new User
+        const newUser = {
+            username,
+            password: hashedPassword
+        };
+
+        //Insert the user document
+        console.log(newUser);
+        const result = await usersCollection.insertOne(newUser);
+
+        if (result.insertedCount === 0) {
+            return res.status(500).json({ message: 'Error registering user' });
+        }
+
+        res.json({ message: 'User registered successfully' });
+    } catch (error) {
+        console.error('Error registering user:', error);
+        res.status(500).json({ message: 'Error registering user' });
+    }
+});
 
 // Route for user login
 app.post('/api/users/login', async (req, res) => {
@@ -118,19 +109,22 @@ app.post('/api/users/login', async (req, res) => {
         // Find user by username
         const user = await usersCollection.findOne({ username });
         if (!user) {
-            return res.status(401).json({ message: 'Invalid username or password' });
+            return res.status(401).json({ message: 'Invalid username or password -1' });
         }
 
         // Compare the provided password with the stored password
         const passwordMatch = await bcrypt.compare(password, user.password);
         if (!passwordMatch) {
-            return res.status(401).json({ message: 'Invalid username or password' });
+            return res.status(401).json({ message: 'Invalid username or password -2' });
         }
 
         // Generate JWT token
-        const token = jwt.sign({ userId: user._id }, 'uBCov5Hb-HWvYcNmCBMKlDv4Z-1xN5n4Nfbac3JccrrCycboCY6-c25jqZ-Lk1mx');
+        const payload = { userId: user._id, username: username };
+        const secretKey = 'uBCov5Hb-HWvYcNmCBMKlDv4Z-1xN5n4Nfbac3JccrrCycboCY6-c25jqZ-Lk1mx';
+        const token = jwt.sign(payload, secretKey, { expiresIn: '1h' });
 
-        res.json({ token });
+        res.setHeader('Authorization', 'Bearer ' + token);
+        res.json({ message: 'Token generated successfully:', token });
     } catch (error) {
         console.error('Error logging in:', error);
         res.status(500).json({ message: 'Error logging in' });
@@ -140,6 +134,7 @@ app.post('/api/users/login', async (req, res) => {
 // Route for adding products to the shopping cart
 app.post('/api/cart', authenticateJWT, async (req, res) => {
     try {
+        console.log(req.body);
         const userId = req.userId;
         const productId = req.body.productId;
         const quantity = req.body.quantity || 1; // Default quantity is 1
@@ -148,8 +143,8 @@ app.post('/api/cart', authenticateJWT, async (req, res) => {
 
         // Find the user and update their cart with the new product
         const result = await usersCollection.updateOne(
-            { _id: ObjectID(userId) },
-            { $addToSet: { cart: { productId: ObjectID(productId), quantity: quantity } } }
+            { _id: ObjectId(userId) },
+            { $addToSet: { cart: { productId: ObjectId(productId), quantity: quantity } } }
         );
 
         if (result.modifiedCount === 0) {
@@ -172,7 +167,7 @@ app.post('/api/orders', authenticateJWT, async (req, res) => {
         const ordersCollection = db.collection('orders');
 
         // Find the user and retrieve their cart
-        const user = await usersCollection.findOne({ _id: ObjectID(userId) });
+        const user = await usersCollection.findOne({ _id: ObjectId(userId) });
         if (!user) {
             return res.status(404).json({ message: 'User not found' });
         }
@@ -181,7 +176,7 @@ app.post('/api/orders', authenticateJWT, async (req, res) => {
 
         // Create an order document with the user's cart
         const order = {
-            userId: ObjectID(userId),
+            userId: ObjectId(userId),
             products: cart,
             createdAt: new Date()
         };
@@ -194,7 +189,7 @@ app.post('/api/orders', authenticateJWT, async (req, res) => {
         }
 
         // Clear the user's cart after placing the order
-        await usersCollection.updateOne({ _id: ObjectID(userId) }, { $set: { cart: [] } });
+        await usersCollection.updateOne({ _id: ObjectId(userId) }, { $set: { cart: [] } });
 
         res.json({ message: 'Order placed successfully', orderId: result.insertedId });
     } catch (error) {
@@ -228,49 +223,41 @@ app.get('/api/products/search', async (req, res) => {
 });
 
 // Route for creating a product
-app.post(
-    '/api/products',
-    [
-        body('name').trim().notEmpty(),
-        body('description').trim().notEmpty(),
-        body('category').trim().notEmpty(),
-        body('price').isNumeric().notEmpty()
-    ],
-    async (req, res) => {
-        try {
-            const errors = validationResult(req);
-            if (!errors.isEmpty()) {
-                return res.status(400).json({ errors: errors.array() });
-            }
-
-            const { name, description, category, price } = req.body;
-            const productsCollection = db.collection('products');
-
-            //Check if a product with the same name already exists
-            const existingProduct = await productsCollection.findOne({ name });
-            if (existingProduct) {
-                return res.status(409).json({ message: 'Product name already exists' });
-            }
-
-            const product = {
-                name,
-                description,
-                category,
-                price: parseFloat(price)
-            };
-
-            const result = await productsCollection.insertOne(product);
-
-            if (result.insertedCount === 0) {
-                return res.status(500).json({ message: 'Error creating product' });
-            }
-
-            res.json({ message: 'Product created successfully', productId: result.insertedId });
-        } catch (error) {
-            console.error('Error creating product:', error);
-            res.status(500).json({ message: 'Error creating product' });
+app.post('/api/products', async (req, res) => {
+    try {
+        const errors = validationResult(req);
+        if (!errors.isEmpty()) {
+            return res.status(400).json({ errors: errors.array() });
         }
+
+        const { name, description, category, price } = req.body;
+        const productsCollection = db.collection('products');
+
+        //Check if a product with the same name already exists
+        const existingProduct = await productsCollection.findOne({ name });
+        if (existingProduct) {
+            return res.status(409).json({ message: 'Product name already exists' });
+        }
+
+        const product = {
+            name,
+            description,
+            category,
+            price: parseFloat(price)
+        };
+
+        const result = await productsCollection.insertOne(product);
+
+        if (result.insertedCount === 0) {
+            return res.status(500).json({ message: 'Error creating product' });
+        }
+
+        res.json({ message: 'Product created successfully', productId: result.insertedId });
+    } catch (error) {
+        console.error('Error creating product:', error);
+        res.status(500).json({ message: 'Error creating product' });
     }
+}
 );
 
 // Route for reading all products with pagination
@@ -298,59 +285,46 @@ app.get('/api/products/', async (req, res) => {
 });
 
 // Route for updating a product
-app.put(
-    '/api/products/:id',
-    [
-        body('name').trim().notEmpty(),
-        body('description').trim().notEmpty(),
-        body('category').trim().notEmpty(),
-        body('price').isNumeric().notEmpty()
-    ],
-    async (req, res) => {
-        try {
-            const errors = validationResult(req);
-            if (!errors.isEmpty()) {
-                return res.status(400).json({ errors: errors.array() });
-            }
+app.put('/api/products/:id', async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { name, description, category, price } = req.body;
+        const productsCollection = db.collection('products');
 
-            const productId = req.params.id;
-            const { name, description, category, price } = req.body;
-            const productsCollection = db.collection('products');
-
-            // Check if a product with the same name already exists
-            const existingProduct = await productsCollection.findOne({ _id: ObjectID(productId) });
-            if (!existingProduct) {
-                return res.status(404).json({ message: 'Product not found' });
-            }
-
-            //Check if the updated name conflicts with another product
-            const duplicateProduct = await productsCollection.findOne({ name, _id: { $ne: ObjectID(productId) } });
-            if (duplicateProduct) {
-                return res.status(409).json({ message: 'Product name already exists' });
-            }
-
-            const updatedProduct = {
-                name,
-                description,
-                category,
-                price: parseFloat(price)
-            };
-
-            const result = await productsCollection.updateOne(
-                { _id: ObjectID(productIdt) },
-                { $set: updatedProduct }
-            );
-
-            if (result.modifiedCount === 0) {
-                return res.status(500).json({ message: 'Error updating product' });
-            }
-
-            res.json({ message: 'Product updated successfully', productId });
-        } catch (error) {
-            console.error('Error updating product:', error);
-            res.status(500).json({ message: 'Error updating product' });
+        // Check if a product with the same name already exists
+        const existingProduct = await productsCollection.findOne({ _id: new ObjectId(id) });
+        if (!existingProduct) {
+            return res.status(404).json({ message: 'Product not found' });
         }
+
+        //Check if the updated name conflicts with another product
+        const duplicateProduct = await productsCollection.findOne({ name, _id: { $ne: new ObjectId(id) } });
+        if (duplicateProduct) {
+            return res.status(409).json({ message: 'Product name already exists' });
+        }
+
+        const updatedProduct = {
+            name,
+            description,
+            category,
+            price: parseFloat(price)
+        };
+
+        const result = await productsCollection.updateOne(
+            { _id: new ObjectId(id) },
+            { $set: updatedProduct }
+        );
+
+        if (result.modifiedCount === 0) {
+            return res.status(500).json({ message: 'Error updating product -1' });
+        }
+
+        res.json({ message: 'Product updated successfully', id });
+    } catch (error) {
+        console.error('Error updating product:', error);
+        res.status(500).json({ message: 'Error updating product' });
     }
+}
 );
 
 // Route for deleting a product
@@ -359,7 +333,7 @@ app.delete('/api/products/:id', async (req, res) => {
         const productId = req.params.id;
         const productsCollection = db.collection('products');
 
-        const result = await productsCollection.deleteOne({ _id: ObjectID(productId) });
+        const result = await productsCollection.deleteOne({ _id: new ObjectId(productId) });
 
         if (result.deletedCount === 0) {
             return res.status(404).json({ message: 'Product not found' });
@@ -384,17 +358,17 @@ app.get('/api/orders', authenticateJWT, async (req, res) => {
         const ordersCollection = db.collection('orders');
 
         // Check if the user exists
-        const user = await usersCollection.findOne({ _id: ObjectID(userId) });
+        const user = await usersCollection.findOne({ _id: ObjectId(userId) });
         if (!user) {
             return res.status(404).json({ message: 'User not found' });
         }
 
         // Retrieve total count of orders for the user
-        const totalOrders = await ordersCollection.countDocuments({ userId: ObjectID(userId) });
+        const totalOrders = await ordersCollection.countDocuments({ userId: ObjectId(userId) });
 
         // Retrieve the paginated list of orders for the user
         const orders = await ordersCollection
-            .find({ userId: ObjectID(userId) })
+            .find({ userId: ObjectId(userId) })
             .skip(skip)
             .limit(limit)
             .toArray();
@@ -414,15 +388,15 @@ app.delete('/api/cart/:productId', authenticateJWT, async (req, res) => {
         const usersCollection = db.collection('users');
 
         // Check if the user exists
-        const user = await usersCollection.findOne({ _id: ObjectID(userId) });
+        const user = await usersCollection.findOne({ _id: ObjectId(userId) });
         if (!user) {
             return res.status(404).json({ message: 'User not found' });
         }
 
         // Remove the product from the user's cart
         const updatedUser = await usersCollection.findOneAndUpdate(
-            { _id: ObjectID(userId) },
-            { $pull: { cart: { productId: ObjectID(productId) } } },
+            { _id: ObjectId(userId) },
+            { $pull: { cart: { productId: ObjectId(productId) } } },
             { returnOriginal: false }
         );
 
