@@ -9,8 +9,8 @@ const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 const rateLimit = require('express-rate-limit');
 const { validationResult } = require('express-validator');
-const JWT_SECRET = "sunfyre-caraxes-meleys-vermithor"; // JWT secret key
-const JWT_EXPIRES_IN = "90";
+const JWT_SECRET = process.env.JWT_SECRET; // JWT secret key
+const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN;
 
 // Express app
 const app = express();
@@ -31,8 +31,8 @@ const limiter = rateLimit({
 app.use(limiter);
 
 // MongoDB configuration
-const MONGO_URI = 'mongodb+srv://starshade:Zamir0407@fictionalonlinestore.9ybvzgf.mongodb.net/';
-const DB_NAME = 'FictionalOnlineStore';
+const MONGO_URI = process.env.MONGODB_URI;
+const DB_NAME = process.env.DB_NAME;
 
 // Connecting MongoDb
 let db;
@@ -135,7 +135,6 @@ app.post('/api/users/login', async (req, res) => {
 // Route for adding products to the shopping cart
 app.post('/api/cart', authorize, async (req, res) => {
     try {
-        console.log(req.userId);
         const userId = req.user.userId;
         const productId = req.body.productId;
         const quantity = req.body.quantity || 1; // Default quantity is 1
