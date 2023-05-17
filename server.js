@@ -1,6 +1,7 @@
 // necessary libraries
 const express = require('express');
 const cors = require('cors');
+require('dotenv').config();
 const helmet = require('helmet');
 const morgan = require('morgan');
 const { MongoClient, ObjectId } = require('mongodb');
@@ -8,6 +9,8 @@ const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 const rateLimit = require('express-rate-limit');
 const { validationResult } = require('express-validator');
+const JWT_SECRET = "sunfyre-caraxes-meleys-vermithor"; // JWT secret key
+const JWT_EXPIRES_IN = "90";
 
 // Express app
 const app = express();
@@ -45,22 +48,23 @@ async function connectToDatabase() {
 }
 connectToDatabase();
 
-// Validating JWT and extracting userID
-const authenticateJWT = (req, res, next) => {
-    const token = req.header('Authorization');
+// Validating JWT
+const authorize = (req, res, next) => {
+
+    const token = req.header('Authorization')?.split(' ')[1];
 
     if (!token) {
         return res.status(401).json({ message: 'Unauthorized' });
     }
 
     try {
-        const decoded = jwt.verify(token, 'uBCov5Hb-HWvYcNmCBMKlDv4Z-1xN5n4Nfbac3JccrrCycboCY6-c25jqZ-Lk1mx');
+        const decoded = jwt.verify(token, JWT_SECRET);
         req.user = decoded;
         next();
     } catch (error) {
         return res.status(403).json({ message: 'Invalid token' });
     }
-}
+};
 
 // Route for user registration
 app.post('/api/users/register', async (req, res) => {
@@ -119,11 +123,8 @@ app.post('/api/users/login', async (req, res) => {
         }
 
         // Generate JWT token
-        const payload = { userId: user._id, username: username };
-        const secretKey = 'uBCov5Hb-HWvYcNmCBMKlDv4Z-1xN5n4Nfbac3JccrrCycboCY6-c25jqZ-Lk1mx';
-        const token = jwt.sign(payload, secretKey, { expiresIn: '1h' });
+        const token = jwt.sign({ id: user._id }, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
 
-        res.setHeader('Authorization', 'Bearer ' + token);
         res.json({ message: 'Token generated successfully:', token });
     } catch (error) {
         console.error('Error logging in:', error);
@@ -132,10 +133,10 @@ app.post('/api/users/login', async (req, res) => {
 });
 
 // Route for adding products to the shopping cart
-app.post('/api/cart', authenticateJWT, async (req, res) => {
+app.post('/api/cart', authorize, async (req, res) => {
     try {
-        console.log(req.body);
-        const userId = req.userId;
+        console.log(req.userId);
+        const userId = req.user.userId;
         const productId = req.body.productId;
         const quantity = req.body.quantity || 1; // Default quantity is 1
 
@@ -143,8 +144,8 @@ app.post('/api/cart', authenticateJWT, async (req, res) => {
 
         // Find the user and update their cart with the new product
         const result = await usersCollection.updateOne(
-            { _id: ObjectId(userId) },
-            { $addToSet: { cart: { productId: ObjectId(productId), quantity: quantity } } }
+            { _id: new ObjectId(userId) },
+            { $addToSet: { cart: { productId: new ObjectId(productId), quantity: quantity } } }
         );
 
         if (result.modifiedCount === 0) {
@@ -159,15 +160,15 @@ app.post('/api/cart', authenticateJWT, async (req, res) => {
 });
 
 // Route for placing an order
-app.post('/api/orders', authenticateJWT, async (req, res) => {
+app.post('/api/orders', authorize, async (req, res) => {
     try {
-        const userId = req.userId;
+        const userId = req.user.userId;
 
         const usersCollection = db.collection('users');
         const ordersCollection = db.collection('orders');
 
         // Find the user and retrieve their cart
-        const user = await usersCollection.findOne({ _id: ObjectId(userId) });
+        const user = await usersCollection.findOne({ _id: new ObjectId(userId) });
         if (!user) {
             return res.status(404).json({ message: 'User not found' });
         }
@@ -176,7 +177,7 @@ app.post('/api/orders', authenticateJWT, async (req, res) => {
 
         // Create an order document with the user's cart
         const order = {
-            userId: ObjectId(userId),
+            userId: new ObjectId(userId),
             products: cart,
             createdAt: new Date()
         };
@@ -189,7 +190,7 @@ app.post('/api/orders', authenticateJWT, async (req, res) => {
         }
 
         // Clear the user's cart after placing the order
-        await usersCollection.updateOne({ _id: ObjectId(userId) }, { $set: { cart: [] } });
+        await usersCollection.updateOne({ _id: new ObjectId(userId) }, { $set: { cart: [] } });
 
         res.json({ message: 'Order placed successfully', orderId: result.insertedId });
     } catch (error) {
@@ -347,9 +348,9 @@ app.delete('/api/products/:id', async (req, res) => {
 });
 
 // Route for retrieving all orders with pagination
-app.get('/api/orders', authenticateJWT, async (req, res) => {
+app.get('/api/orders', authorize, async (req, res) => {
     try {
-        const userId = req.userId;
+        const userId = req.user.userId;
         const page = parseInt(req.query.page) || 1; // Default page is 1
         const limit = parseInt(req.query.limit) || 10; // Default limit is 10
         const skip = (page - 1) * limit;
@@ -358,17 +359,17 @@ app.get('/api/orders', authenticateJWT, async (req, res) => {
         const ordersCollection = db.collection('orders');
 
         // Check if the user exists
-        const user = await usersCollection.findOne({ _id: ObjectId(userId) });
+        const user = await usersCollection.findOne({ _id: new ObjectId(userId) });
         if (!user) {
             return res.status(404).json({ message: 'User not found' });
         }
 
         // Retrieve total count of orders for the user
-        const totalOrders = await ordersCollection.countDocuments({ userId: ObjectId(userId) });
+        const totalOrders = await ordersCollection.countDocuments({ userId: new ObjectId(userId) });
 
         // Retrieve the paginated list of orders for the user
         const orders = await ordersCollection
-            .find({ userId: ObjectId(userId) })
+            .find({ userId: new ObjectId(userId) })
             .skip(skip)
             .limit(limit)
             .toArray();
@@ -381,22 +382,22 @@ app.get('/api/orders', authenticateJWT, async (req, res) => {
 });
 
 // Route for removing a product from the shopping cart
-app.delete('/api/cart/:productId', authenticateJWT, async (req, res) => {
+app.delete('/api/cart/:productId', authorize, async (req, res) => {
     try {
-        const userId = req.userId;
+        const userId = req.user.userId;
         const productId = req.params.productId;
         const usersCollection = db.collection('users');
 
         // Check if the user exists
-        const user = await usersCollection.findOne({ _id: ObjectId(userId) });
+        const user = await usersCollection.findOne({ _id: new ObjectId(userId) });
         if (!user) {
             return res.status(404).json({ message: 'User not found' });
         }
 
         // Remove the product from the user's cart
         const updatedUser = await usersCollection.findOneAndUpdate(
-            { _id: ObjectId(userId) },
-            { $pull: { cart: { productId: ObjectId(productId) } } },
+            { _id: new ObjectId(userId) },
+            { $pull: { cart: { productId: new ObjectId(productId) } } },
             { returnOriginal: false }
         );
 
